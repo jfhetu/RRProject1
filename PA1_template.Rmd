@@ -4,22 +4,196 @@ output:
   html_document:
     keep_md: true
 ---
+## Preparation of Environment & Packages
+```{r, echo=FALSE, output=FALSE}
+library(ggplot2)
+library(graphics)
+library(dplyr)
+library(lubridate)
+library(knitr)
+library(gridExtra)
 
+# fix date bug
+Sys.setenv(TZ = "America/Toronto")
+```
 
 ## Loading and preprocessing the data
 
+###Load the data
+```{r}
+## read outcome data
+raw_data <- read.csv("activity.csv", na.strings = "NA", stringsAsFactors = FALSE)
 
+str(raw_data)
+summary( raw_data )
+```
+
+### Process/transform the data
+
+The strategy adopted here is essentially to remove lines containing NA.
+```{r}
+# filter out records with NA
+data <- filter(raw_data, !is.na(steps))
+
+# Convert date strings to time_stamps
+data <- mutate(data, datetime=as.POSIXct(date) )  #Convert strings as Lubridate datestime format
+
+str(data)
+summary( data ) ## 15264 = 17568 - 2304 : validate we removes the correct number of lines
+```
 
 ## What is mean total number of steps taken per day?
 
+###Calculate the total number of steps taken per day
+
+```{r}
+# create dataframe for total number of steps per day 
+df <- mutate(data, date_col = as.POSIXct(datetime)) %>%  #convert strings to POSIX Date for
+  group_by(date_col) %>%
+  summarize(totalSteps = sum(steps))
+
+
+data_histogram <- data.frame(x = factor(df$date_col), y = df$totalSteps)
+ghist1 <- ggplot( data_histogram , aes( y= y) ) +
+  geom_histogram() +
+  ggtitle("Total Number of steps taken each day") +
+  ylab("Total Number of steps taken each day" ) +
+  xlab("Occurence count") +
+  xlim(c(0,16)) +
+  scale_x_continuous(breaks = seq(0,16,2) ) 
+plot(ghist1)
+
+```
+###Calculate the  mean and median of the total number of steps taken per day
+
+```{r}
+# create dataframe for the mean and median of the total number of steps taken per day
+mean <-   summarize(df, mean = mean(totalSteps))
+median <- summarize(df, mean = median(totalSteps))  
+
+sprintf("mean = %f , median = %f ", mean, median)
+
+```
 
 
 ## What is the average daily activity pattern?
 
+```{r}
+# create dataframe for total number of steps per day 
+dfIntervals <- mutate(data, date_col = as.POSIXct(datetime)) %>%
+  group_by(interval) %>%
+  summarize(averageSteps = mean(steps))
 
+g1 <- ggplot( dfIntervals , aes(x=interval,y=averageSteps) ) +
+  geom_line() +
+  ggtitle(" Average daily activity pattern ") +
+  ylab("Average Steps" ) +
+  xlab(  "Interval") 
+plot(g1)
+
+maxAvg <- dfIntervals[which.max(dfIntervals$averageSteps),]
+sprintf("The interval %i contains the maximum average (%f)", maxAvg$interval, maxAvg$averageSteps )
+
+```
 
 ## Imputing missing values
+###Number of missing values
+```{r}
+raw_data %>%
+  select(everything()) %>%  # replace to your needs
+  summarise_all(funs(sum(is.na(.))))
+```
+```{r}
+
+filledData <- raw_data %>% 
+  mutate(datetime=as.POSIXct(date) ) %>%
+  group_by(interval) %>%
+  mutate(steps= ifelse(is.na(steps), mean(steps, na.rm=TRUE), steps))
+
+summary(filledData)
+
+df2 <- mutate(filledData, date_col = as.POSIXct(datetime)) %>%  #convert strings to POSIX Date for
+  group_by(date_col) %>%
+  summarize(totalSteps = sum(steps))
 
 
+data_histogram2 <- data.frame(x = factor(df2$date_col), y = df2$totalSteps)
+ghist2 <- ggplot( data_histogram2 , aes( y= y) ) +
+  geom_histogram() +
+  ggtitle("(Imputating NA)") +
+  ylab("Total Number of steps taken each day" ) +
+  xlab("Occurence count") +
+  xlim(c(0,16)) +
+  scale_x_continuous(breaks = seq(0,16,2) ) 
+
+
+grid.arrange(ghist1, ghist2,ncol=2)
+
+
+# create dataframe for the mean and median of the total number of steps taken per day
+mean <-   summarize(df2, mean = mean(totalSteps))
+median <- summarize(df2, mean = median(totalSteps))  
+
+sprintf("mean = %f , median = %f ", mean, median)
+
+```
+
+###Impact on dailynimber of steps 
+
+```{r}
+g1 <- ggplot( df , aes(x=date_col,y=totalSteps), color="blue" ) +
+  geom_line() +
+  geom_point(data=df2,aes(x=date_col,y=totalSteps), color="red") +
+  ggtitle(" Total daily activity pattern ") +
+  ylab("total daily Steps" ) +
+  xlab(  "Date") 
+plot(g1)
+```
+
+The impact of imputing missing data on the estimates of the total daily number of steps
+ is shown on the previous time serie.  The red points correspond to the data in which we 
+ assigned the average of the interval to the missing fields.  The black line correspond 
+ to the dataset in which we deleted the lines containing NA.  Red points which are not 
+ superimposed with the black line are the result of the imputation of missing values. 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+```{r}
+# create dataframe for total number of steps per day 
+
+weekData <- filledData %>% 
+  mutate(datetime=as.POSIXct(date) ) %>%
+  mutate(day = weekdays(datetime)) %>%
+  mutate(weekday = as.factor(ifelse(wday(datetime,week_start=1)< 6, "weekday", "weekend"))) 
+ 
+
+
+dfWeekdayIntervals <- weekData %>% filter(weekday == "weekday" ) %>%
+  group_by(interval) %>%
+  summarise(averageSteps=mean(steps))
+
+
+dfWeekEndIntervals <- weekData %>% filter( weekday == "weekend" ) %>%
+  group_by(interval) %>%
+  summarise(averageSteps=mean(steps))
+
+
+g1 <- ggplot( dfWeekdayIntervals , aes(x=interval,y=averageSteps) ) +
+  geom_line() +
+  ggtitle("Weekday Average daily activity") +
+  ylab("Average Steps" ) +
+  xlab(  "Interval") 
+
+g2 <- ggplot( dfWeekEndIntervals , aes(x=interval,y=averageSteps) ) +
+  geom_line() +
+  ggtitle("Weekend Average daily activity") +
+  ylab("Average Steps" ) +
+  xlab(  "Interval") 
+
+
+grid.arrange(g1, g2,ncol=1)
+
+maxAvg <- dfIntervals[which.max(dfIntervals$averageSteps),]
+sprintf("The interval %i contains the maximum average (%f)", maxAvg$interval, maxAvg$averageSteps )
+
+```
